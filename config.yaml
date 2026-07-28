@@ -1,0 +1,52 @@
+# =====================================================================
+# Default settings for the Gigapixel + Bloom automation.
+# These are used as-is when the AI step is OFF, and as the starting
+# point / guardrails when the AI step is ON.
+#
+# Pipeline order (Leslie's real workflow):
+#   1) Bloom      -> painterly-preserving enhancement (adds pixels)
+#   2) REVIEW     -> Leslie visually approves / re-runs Bloom until good
+#   3) Gigapixel  -> final pass: fix aspect ratio + upscale for print
+# =====================================================================
+
+# ---- Step 1: Bloom enhancement ----
+# Leslie's rule: keep the painterly brush strokes, use the LOWEST creative
+# changes. "Bloom Realism" + low strength preserves detail; "Bloom Creative"
+# changes the image more (avoid unless asked).
+bloom:
+  model: "Bloom Realism"
+  strength: 0.25               # 0.01-1.0 ; low = least smoothing / most painterly
+  # Faces are a known failure mode (Bloom rounds eyes). Keep face handling gentle.
+  face_enhancement: true
+  face_enhancement_strength: 0.3
+  face_enhancement_creativity: 0.0   # 0 = stay faithful, do not re-imagine faces
+
+# ---- Step 3: final Gigapixel pass (print prep) ----
+gigapixel_final:
+  model: "High Fidelity V2"    # detail-preserving upscaler
+  # Upscale so the LONGEST edge reaches at least this many pixels, preserving
+  # the original aspect ratio. 6000px long edge = ~20 inch print at 300 DPI.
+  target_long_edge_px: 6000
+
+# ---- Print output requirements (Lumaprints) ----
+output:
+  format: "jpeg"          # jpeg | png  (Lumaprints accepts JPG/JPEG/PNG)
+  # Leslie's rule (26 Jul): 300 DPI for painterly art, 200 DPI for illustration.
+  # The AI step classifies each image; painterly is the safe default.
+  dpi_painterly: 300
+  dpi_illustration: 200
+  jpeg_quality: 95
+  max_file_size_mb: 100   # Lumaprints web uploader cap (warn if exceeded)
+
+# ---- AI vision step ----
+ai:
+  enabled: true         # set false to always use the defaults above
+  # Instructions handed to the AI when it inspects each image. This encodes
+  # Leslie's preferences. Tweak freely.
+  instructions: |
+    This is painterly digital art (often golf scenes) that will be printed large.
+    Preserve the painted look: keep brush strokes and fine detail, do NOT smooth
+    them into a photo or illustration. Prefer the LOWEST creative changes.
+    If the image contains human faces, be extra conservative so faces/eyes are
+    not reshaped. The goal is a clean, high-resolution, print-ready image that
+    still looks hand-painted.

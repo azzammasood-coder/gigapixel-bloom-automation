@@ -303,7 +303,9 @@ class Pipeline:
                 settings["gigapixel_model"] = s["gigapixel_model"]
                 settings["bloom"]["model"] = s["bloom_model"]
                 settings["bloom"]["strength"] = s["bloom_strength"]
-                settings["bloom"]["face_enhancement"] = s["has_faces"]
+                # Note whether faces are present, but do NOT auto-enable face
+                # enhancement — it can reshape eyes/gaze (Leslie's rule). The config
+                # default (off) wins unless a human turns it on.
                 settings["bloom"]["face_enhancement_strength"] = s["face_enhancement_strength"]
                 settings["source"] = "ai"
                 settings["ai_notes"] = s.get("notes", "")

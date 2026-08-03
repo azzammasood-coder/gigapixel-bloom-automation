@@ -16,9 +16,11 @@
 bloom:
   model: "Bloom Realism"
   strength: 0.25               # 0.01-1.0 ; low = least smoothing / most painterly
-  # Faces are a known failure mode (Bloom rounds eyes). Keep face handling gentle.
-  face_enhancement: true
-  face_enhancement_strength: 0.3
+  # Faces are a known failure mode: face enhancement can re-draw eyes / shift gaze.
+  # Per Leslie's "don't reshape faces" rule, this is OFF by default so Bloom cleans
+  # the painting but leaves the face alone. Turn it on per-image only if wanted.
+  face_enhancement: false
+  face_enhancement_strength: 0.3     # only used if face_enhancement is turned on
   face_enhancement_creativity: 0.0   # 0 = stay faithful, do not re-imagine faces
 
 # ---- Step 3: final Gigapixel pass (print prep) ----

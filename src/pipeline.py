@@ -19,8 +19,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import image_utils
-from .config import SUPPORTED_INPUT_EXTENSIONS, Config
+from .config import SUPPORTED_INPUT_EXTENSIONS, Config, log_file_path
 from .llm_advisor import LLMAdvisor
+from .run_logger import RunLogger, ensure_logger
 from .topaz_client import TopazClient
 
 Logger = Callable[[str], None]
@@ -67,11 +68,13 @@ class Pipeline:
         self,
         config: Config,
         *,
-        logger: Logger | None = None,
+        logger=None,
         dry_run: bool = False,
     ) -> None:
         self.config = config
-        self.log: Logger = logger or (lambda _msg: None)
+        # A RunLogger gives us both a plain (window/console) and technical (log.txt)
+        # stream. Plain callables / None are wrapped for backward compatibility.
+        self.log: RunLogger = ensure_logger(logger, log_file_path())
         self.dry_run = dry_run
 
         secrets = config.secrets
@@ -91,16 +94,17 @@ class Pipeline:
         review_dir = Path(output_dir) / REVIEW_SUBDIR
         review_dir.mkdir(parents=True, exist_ok=True)
         if not images:
-            self.log(f"No supported images found at: {input_path}")
+            self.log.user("No images found. Please pick an image file or a folder of images.")
             return []
 
-        self.log(f"Phase 1 (Bloom): {len(images)} image(s) -> {review_dir}")
+        self.log.banner(f"Step 1 of 2 — Enhancing {len(images)} image(s) with Bloom")
+        self.log.detail(f"input={input_path}  review_dir={review_dir}")
         results = []
         for i, img in enumerate(images, 1):
-            self.log(f"\n[{i}/{len(images)}] {img.name}")
+            self.log.user(f"[{i} of {len(images)}]  {img.name}")
             results.append(self.bloom_one(img, review_dir))
         ok = sum(1 for r in results if r.ok)
-        self.log(f"\nBloom done: {ok}/{len(results)} ready for review in {review_dir}")
+        self.log.user(f"Bloom finished — {ok} of {len(results)} ready to review.")
         return results
 
     def bloom_one(
@@ -124,15 +128,18 @@ class Pipeline:
             if strength_override is not None:
                 settings["bloom"]["strength"] = float(strength_override)
             result.settings = settings
-            self.log(f"      settings: {_summarize(settings)}")
+            self.log.detail(f"settings: {_summarize(settings)}")
 
             if self.dry_run:
                 # No API: copy the original so the review step has something to show.
                 shutil.copyfile(image_path, bloom_out)
-                self.log("      (dry-run: copied original as Bloom preview)")
+                self.log.detail("dry-run: copied original as Bloom preview (no API call)")
             else:
                 bloom = settings["bloom"]
-                self.log("      running Bloom")
+                self.log.user("   Enhancing with Bloom…")
+                self.log.detail(
+                    f"Bloom params: model={bloom['model']} strength={bloom['strength']} "
+                    f"face={bloom['face_enhancement']}/{bloom['face_enhancement_strength']}")
                 self.client.enhance(
                     image_path, bloom_out,
                     model=bloom["model"], output_format="png",
@@ -156,10 +163,10 @@ class Pipeline:
             result.bloom_output = bloom_out
             result.sidecar = sidecar
             result.ok = True
-            self.log(f"      [OK] Bloom ready: {bloom_out.name}")
+            self.log.user("   Done — ready to review.")
         except Exception as exc:  # noqa: BLE001 - per-image, keep batch going
             result.error = str(exc)
-            self.log(f"      x Bloom FAILED: {exc}")
+            self.log.error(f"couldn't enhance {image_path.name}: {exc}", exc)
         return result
 
     # ======================================================================
@@ -182,16 +189,17 @@ class Pipeline:
             sidecars = [s for s in sidecars if s.name[: -len(SIDECAR_SUFFIX)] in wanted]
 
         if not sidecars:
-            self.log("No approved Bloom results to finish.")
+            self.log.user("Nothing approved to finish.")
             return []
 
-        self.log(f"Phase 2 (Gigapixel finish): {len(sidecars)} image(s) -> {output_dir}")
+        self.log.banner(f"Step 2 of 2 — Upscaling {len(sidecars)} approved image(s) for print")
+        self.log.detail(f"output_dir={output_dir}")
         results = []
         for i, sc in enumerate(sidecars, 1):
-            self.log(f"\n[{i}/{len(sidecars)}] {sc.name[:-len(SIDECAR_SUFFIX)]}")
+            self.log.user(f"[{i} of {len(sidecars)}]  {sc.name[:-len(SIDECAR_SUFFIX)]}")
             results.append(self.finish_one(sc, output_dir))
         ok = sum(1 for r in results if r.ok)
-        self.log(f"\nFinish done: {ok}/{len(results)} print-ready in {output_dir}")
+        self.log.user(f"All done — {ok} of {len(results)} print-ready file(s) saved.")
         return results
 
     def finish_one(self, sidecar_path: Path, output_dir: Path) -> ImageResult:
@@ -210,11 +218,13 @@ class Pipeline:
 
             step_final = work_dir / f"{stem}_gigapixel_final.png"
             if self.dry_run:
-                self.log("      (dry-run: skipping Gigapixel, finalizing Bloom image)")
+                self.log.detail("dry-run: skipping Gigapixel, finalizing Bloom image")
                 step_final = bloom_out
             elif max(cur_w, cur_h) < target:
                 fw, fh = image_utils.size_for_long_edge(cur_w, cur_h, target)
-                self.log(f"      Gigapixel final -> {fw}x{fh}")
+                self.log.user("   Upscaling for print with Gigapixel…")
+                self.log.detail(f"Gigapixel {cur_w}x{cur_h} -> {fw}x{fh} "
+                                f"(model={sidecar.get('gigapixel_model', final_cfg['model'])})")
                 self.client.enhance(
                     bloom_out, step_final,
                     model=sidecar.get("gigapixel_model", final_cfg["model"]),
@@ -222,7 +232,7 @@ class Pipeline:
                     output_width=fw, output_height=fh, logger=self.log,
                 )
             else:
-                self.log("      Gigapixel skipped (already at/above print resolution)")
+                self.log.detail("Gigapixel skipped (already at/above print resolution)")
                 step_final = bloom_out
 
             # DPI depends on image type: 300 painterly, 200 illustration.
@@ -247,14 +257,15 @@ class Pipeline:
                     "Upload the order first, then email/WeTransfer/Dropbox the file."
                 )
                 result.warnings.append(warn)
-                self.log(f"      [!] {warn}")
+                self.log.user(f"   Note: {warn}")
 
             result.output = final_path
             result.ok = True
-            self.log(f"      [OK] print-ready: {final_path.name} ({size_mb:.1f} MB, {dpi} DPI)")
+            self.log.user(f"   Saved: {final_path.name}  ({size_mb:.1f} MB, {dpi} DPI)")
+            self.log.detail(f"final -> {final_path}")
         except Exception as exc:  # noqa: BLE001
             result.error = str(exc)
-            self.log(f"      x FAILED: {exc}")
+            self.log.error(f"couldn't finish {source.name}: {exc}", exc)
         return result
 
     # ======================================================================
@@ -297,7 +308,7 @@ class Pipeline:
                 settings["source"] = "ai"
                 settings["ai_notes"] = s.get("notes", "")
             except Exception as exc:  # noqa: BLE001 - AI is best-effort; fall back to defaults
-                self.log(f"      (AI step failed, using defaults: {exc})")
+                self.log.detail(f"AI step failed, using defaults: {exc}")
 
         return settings
 

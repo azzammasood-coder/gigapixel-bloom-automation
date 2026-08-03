@@ -21,8 +21,9 @@ from __future__ import annotations
 import argparse
 import sys
 
-from src.config import load_config
+from src.config import load_config, log_file_path
 from src.pipeline import Pipeline
+from src.run_logger import RunLogger
 
 # Windows consoles default to cp1252; make sure any Unicode in logs/errors is safe.
 for _stream in (sys.stdout, sys.stderr):
@@ -32,8 +33,8 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 
-def _log(msg: str) -> None:
-    print(msg, flush=True)
+def _make_logger() -> RunLogger:
+    return RunLogger(log_file_path(), ui_callback=lambda m: print(m, flush=True))
 
 
 def _load(args):
@@ -67,7 +68,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
 
-    pipeline = Pipeline(config, logger=_log, dry_run=args.dry_run)
+    pipeline = Pipeline(config, logger=_make_logger(), dry_run=args.dry_run)
 
     try:
         if args.command == "bloom":

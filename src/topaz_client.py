@@ -74,7 +74,8 @@ class TopazClient:
         """
         image_path = Path(image_path)
         output_path = Path(output_path)
-        log = logger or (lambda *_: None)
+        # Prefer technical stream if available; else accept a plain callable/None.
+        detail = getattr(logger, "detail", None) or logger or (lambda *_: None)
 
         process_id = self._submit(
             image_path,
@@ -84,11 +85,11 @@ class TopazClient:
             output_height=output_height,
             params=params or {},
         )
-        log(f"      submitted job {process_id} (model='{model}')")
-        self._wait_until_complete(process_id, log)
+        detail(f"submitted job {process_id} (model='{model}', out={output_width}x{output_height})")
+        self._wait_until_complete(process_id, detail)
         url = self._download_url(process_id)
         self._save(url, output_path)
-        log(f"      saved -> {output_path.name}")
+        detail(f"saved -> {output_path}")
         return output_path
 
     # -- steps --------------------------------------------------------------

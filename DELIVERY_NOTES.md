@@ -26,14 +26,20 @@ See **`deliverables/before_after_bloom.jpg`** and **`face_detail_compare.jpg`**:
 brush strokes are preserved and the face is not distorted. The final file came out at
 6000×6000, 300 DPI, ~7 MB — print-ready.
 
-## What you need to do to run it at full volume
-1. **Install Python 3.10+** (one-time) from python.org — tick "Add Python to PATH".
-2. **Add Topaz API credits.** The tool uses your Topaz Labs API. The trial balance
-   (~20 credits) is only enough for testing; processing real batches needs a paid
-   top-up on your Topaz account. This is the only outside dependency — the software
-   itself is complete.
-3. **Add your key:** copy `.env.example` to `.env` and paste your Topaz API key.
-4. Double-click `Start.bat`.
+## How to run it (no installation needed)
+The app is delivered as a ready-to-run Windows program — **you do not need to
+install Python or anything else.**
+
+1. Open the `.env` file (Notepad) and paste your Topaz Labs API key after
+   `TOPAZ_API_KEY=`, then save.
+2. Double-click **`GigapixelBloom.exe`**.
+3. **Add Topaz API credits.** The app uses your Topaz Labs API. The trial balance
+   (~20 credits) is only enough for testing; processing real batches needs a small
+   paid top-up on your Topaz account. This is the only outside dependency — the
+   software itself is complete.
+
+(There is also a `log.txt` written next to the app if anything goes wrong, and a
+`config.yaml` you can open to change default settings.)
 
 ## Two small preferences you can confirm anytime (already set to safe defaults)
 - **Bloom upscaling:** right now Bloom enhances at the original size and Gigapixel

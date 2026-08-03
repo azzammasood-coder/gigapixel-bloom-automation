@@ -50,10 +50,10 @@ Each row = one on-screen action + what to say.
   > while still letting you approve each result."
 
 ### Launch the app (0:35–0:50)
-- **Show:** double-click `Start.bat`; the app window opens.
+- **Show:** double-click `GigapixelBloom.exe`; the app window opens.
 - **Say:**
-  > "You open it by double-clicking Start. No coding. You pick an image or a folder,
-  > pick where to save, and press Run Bloom."
+  > "You open it by double-clicking the app — nothing to install, no coding. You pick
+  > an image or a folder, pick where to save, and press Run Bloom."
 
 ### Phase 1 — Bloom (0:50–1:20)  *(Version A: real run)*
 - **Show:** click **Folder…**, choose `example-images` (or a single image); pick an

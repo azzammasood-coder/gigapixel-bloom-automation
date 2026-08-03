@@ -9,15 +9,18 @@ Because Bloom can occasionally distort an image (especially faces), there is a
 **human review step** in the middle: you approve the good Bloom results — and
 re-run Bloom on any that look wrong — before the final Gigapixel upscale.
 
-## For Leslie (easy way)
+## For Leslie (easy way — no installing anything)
 
-1. Install **Python 3.10+** from https://www.python.org/downloads/ (tick *"Add
-   Python to PATH"* during install).
-2. Put your key in a file named `.env` (copy `.env.example` and fill it in).
-3. **Double-click `Start.bat`.** The first run sets things up automatically, then
-   the app window opens.
-4. **Run Bloom** on your image/folder → **review** the results (approve or re-run) →
+Use the ready-to-run app (the `GigapixelBloom` folder — Windows, no Python needed):
+
+1. Open the `.env` file (right-click → Open with → Notepad), paste your Topaz Labs
+   API key after `TOPAZ_API_KEY=`, and save.
+2. **Double-click `GigapixelBloom.exe`.**
+3. **Run Bloom** on your image/folder → **review** the results (approve or re-run) →
    **Finish approved** to upscale and save the print-ready files.
+
+Keep everything in that folder together. A `log.txt` is written there if anything
+goes wrong — send it to your developer for a quick fix. See `READ ME FIRST.txt`.
 
 ## For developers (command line)
 

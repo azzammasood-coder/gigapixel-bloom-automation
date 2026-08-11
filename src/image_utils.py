@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from PIL import Image
@@ -59,3 +60,18 @@ def finalize_for_print(
 
 def file_size_mb(path: str | Path) -> float:
     return Path(path).stat().st_size / (1024 * 1024)
+
+
+def tagged_name(stem: str, tag: str) -> str:
+    """Insert a tag before the aspect-ratio marker in a filename stem.
+
+    "Amanda at the Flag AR 1x1"  + "Prepress"  ->  "Amanda at the Flag Prepress AR 1x1"
+    "Sunset over the 9th"        + "Prepress"  ->  "Sunset over the 9th Prepress"
+    """
+    tag = tag.strip()
+    m = re.search(r"\bAR\b", stem, flags=re.IGNORECASE)
+    if m:
+        head = stem[: m.start()].rstrip()
+        rest = stem[m.start():].strip()
+        return f"{head} {tag} {rest}".strip()
+    return f"{stem.rstrip()} {tag}".strip()

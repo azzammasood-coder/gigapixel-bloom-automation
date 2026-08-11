@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -44,7 +45,8 @@ class BloomResult:
 @dataclass
 class ImageResult:
     source: Path
-    output: Path | None = None
+    output: Path | None = None            # high-res "Prepress" file (primary)
+    placeholder: Path | None = None       # low-res "Placeholder" file
     ok: bool = False
     error: str | None = None
     warnings: list[str] = field(default_factory=list)
@@ -85,24 +87,33 @@ class Pipeline:
         if ai_cfg.get("enabled") and secrets and secrets.has_llm and not dry_run:
             self.advisor = LLMAdvisor(secrets.llm_api_key, secrets.llm_base_url, secrets.llm_model)
 
+        # Working files (Bloom results + Gigapixel intermediates) live in a temp
+        # folder, NOT in the user's output folder — the output folder should only
+        # ever contain the final Prepress / Placeholder images.
+        self.work_root = Path(tempfile.gettempdir()) / "GigapixelBloom_work"
+        self.review_dir = self.work_root / REVIEW_SUBDIR
+        self.gigapixel_dir = self.work_root / "gigapixel"
+
     # ======================================================================
     # Phase 1 — Bloom
     # ======================================================================
 
     def run_bloom_phase(self, input_path: str | Path, output_dir: str | Path) -> list[BloomResult]:
         images = collect_images(input_path)
-        review_dir = Path(output_dir) / REVIEW_SUBDIR
-        review_dir.mkdir(parents=True, exist_ok=True)
+        # Fresh review folder each run so old results don't linger (it's in temp).
+        if self.review_dir.exists():
+            shutil.rmtree(self.review_dir, ignore_errors=True)
+        self.review_dir.mkdir(parents=True, exist_ok=True)
         if not images:
             self.log.user("No images found. Please pick an image file or a folder of images.")
             return []
 
         self.log.banner(f"Step 1 of 2 — Enhancing {len(images)} image(s) with Bloom")
-        self.log.detail(f"input={input_path}  review_dir={review_dir}")
+        self.log.detail(f"input={input_path}  review_dir={self.review_dir}")
         results = []
         for i, img in enumerate(images, 1):
             self.log.user(f"[{i} of {len(images)}]  {img.name}")
-            results.append(self.bloom_one(img, review_dir))
+            results.append(self.bloom_one(img))
         ok = sum(1 for r in results if r.ok)
         self.log.user(f"Bloom finished — {ok} of {len(results)} ready to review.")
         return results
@@ -110,19 +121,19 @@ class Pipeline:
     def bloom_one(
         self,
         image_path: Path,
-        review_dir: Path,
         *,
         strength_override: float | None = None,
     ) -> BloomResult:
-        """Run Bloom on one image and write the result + sidecar into review_dir.
+        """Run Bloom on one image and write the result + sidecar into the review dir.
 
         `strength_override` lets the review UI re-run with a different strength.
         """
         image_path = Path(image_path)
         result = BloomResult(source=image_path)
+        self.review_dir.mkdir(parents=True, exist_ok=True)
         stem = image_path.stem
-        bloom_out = review_dir / f"{stem}{BLOOM_SUFFIX}"
-        sidecar = review_dir / f"{stem}{SIDECAR_SUFFIX}"
+        bloom_out = self.review_dir / f"{stem}{BLOOM_SUFFIX}"
+        sidecar = self.review_dir / f"{stem}{SIDECAR_SUFFIX}"
         try:
             settings = self._decide_settings(image_path)
             if strength_override is not None:
@@ -182,8 +193,8 @@ class Pipeline:
         """Finish approved Bloom results. `only` = list of stems to include
         (default: everything in the review folder)."""
         output_dir = Path(output_dir)
-        review_dir = output_dir / REVIEW_SUBDIR
-        sidecars = sorted(review_dir.glob(f"*{SIDECAR_SUFFIX}"))
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sidecars = sorted(self.review_dir.glob(f"*{SIDECAR_SUFFIX}"))
         if only is not None:
             wanted = {s for s in only}
             sidecars = [s for s in sidecars if s.name[: -len(SIDECAR_SUFFIX)] in wanted]
@@ -207,18 +218,18 @@ class Pipeline:
         source = Path(sidecar["source"])
         bloom_out = Path(sidecar["bloom_output"])
         result = ImageResult(source=source)
-        work_dir = output_dir / ".work"
-        work_dir.mkdir(parents=True, exist_ok=True)
+        self.gigapixel_dir.mkdir(parents=True, exist_ok=True)
         stem = source.stem
         try:
             final_cfg = self.config["gigapixel_final"]
             out_cfg = self.config["output"]
-            target = int(final_cfg.get("target_long_edge_px", 6000))
+            ext = _ext(self.config)
+            target = int(final_cfg.get("target_long_edge_px", 10800))
             cur_w, cur_h = image_utils.get_size(bloom_out)
 
-            step_final = work_dir / f"{stem}_gigapixel_final.png"
+            step_final = self.gigapixel_dir / f"{stem}_gigapixel_final.png"
             if self.dry_run:
-                self.log.detail("dry-run: skipping Gigapixel, finalizing Bloom image")
+                self.log.detail("dry-run: skipping Gigapixel, using Bloom image as-is")
                 step_final = bloom_out
             elif max(cur_w, cur_h) < target:
                 fw, fh = image_utils.size_for_long_edge(cur_w, cur_h, target)
@@ -235,34 +246,52 @@ class Pipeline:
                 self.log.detail("Gigapixel skipped (already at/above print resolution)")
                 step_final = bloom_out
 
-            # DPI depends on image type: 300 painterly, 200 illustration.
-            dpi = int(
-                out_cfg.get("dpi_illustration", 200)
+            # Prepress DPI depends on image type: 300 painterly, 200 illustration.
+            prepress_dpi = int(
+                out_cfg.get("prepress_dpi_illustration", 200)
                 if sidecar.get("image_type") == "illustration"
-                else out_cfg.get("dpi_painterly", 300)
-            )
-            final_path = output_dir / f"{stem}_print.{_ext(self.config)}"
-            image_utils.finalize_for_print(
-                step_final, final_path,
-                fmt=out_cfg.get("format", "jpeg"),
-                dpi=dpi,
-                jpeg_quality=int(out_cfg.get("jpeg_quality", 95)),
+                else out_cfg.get("prepress_dpi_painterly", 300)
             )
 
-            size_mb = image_utils.file_size_mb(final_path)
+            # --- High-res "Prepress" file ---
+            prepress_path = output_dir / f"{image_utils.tagged_name(stem, out_cfg.get('prepress_tag', 'Prepress'))}.{ext}"
+            image_utils.finalize_for_print(
+                step_final, prepress_path,
+                fmt=out_cfg.get("format", "jpeg"),
+                dpi=prepress_dpi,
+                jpeg_quality=int(out_cfg.get("prepress_jpeg_quality", 95)),
+            )
+
+            # --- Low-res "Placeholder" file (same pixels, smaller file) ---
+            placeholder_path = output_dir / f"{image_utils.tagged_name(stem, out_cfg.get('placeholder_tag', 'Placeholder'))}.{ext}"
+            image_utils.finalize_for_print(
+                step_final, placeholder_path,
+                fmt=out_cfg.get("format", "jpeg"),
+                dpi=int(out_cfg.get("placeholder_dpi", 72)),
+                jpeg_quality=int(out_cfg.get("placeholder_jpeg_quality", 70)),
+            )
+
+            # Tidy up the Gigapixel intermediate (never shown to the user).
+            if step_final != bloom_out:
+                step_final.unlink(missing_ok=True)
+
+            pre_mb = image_utils.file_size_mb(prepress_path)
+            ph_mb = image_utils.file_size_mb(placeholder_path)
             cap = float(out_cfg.get("max_file_size_mb", 100))
-            if size_mb > cap:
+            if pre_mb > cap:
                 warn = (
-                    f"File is {size_mb:.0f} MB (> {cap:.0f} MB Lumaprints web cap). "
+                    f"Prepress file is {pre_mb:.0f} MB (> {cap:.0f} MB Lumaprints web cap). "
                     "Upload the order first, then email/WeTransfer/Dropbox the file."
                 )
                 result.warnings.append(warn)
                 self.log.user(f"   Note: {warn}")
 
-            result.output = final_path
+            result.output = prepress_path
+            result.placeholder = placeholder_path
             result.ok = True
-            self.log.user(f"   Saved: {final_path.name}  ({size_mb:.1f} MB, {dpi} DPI)")
-            self.log.detail(f"final -> {final_path}")
+            self.log.user(f"   Saved: {prepress_path.name}  ({pre_mb:.1f} MB, {prepress_dpi} DPI)")
+            self.log.user(f"          {placeholder_path.name}  ({ph_mb:.1f} MB, web copy)")
+            self.log.detail(f"prepress -> {prepress_path}\nplaceholder -> {placeholder_path}")
         except Exception as exc:  # noqa: BLE001
             result.error = str(exc)
             self.log.error(f"couldn't finish {source.name}: {exc}", exc)

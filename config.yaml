@@ -26,19 +26,39 @@ bloom:
 # ---- Step 3: final Gigapixel pass (print prep) ----
 gigapixel_final:
   model: "High Fidelity V2"    # detail-preserving upscaler
-  # Upscale so the LONGEST edge reaches at least this many pixels, preserving
-  # the original aspect ratio. 6000px long edge = ~20 inch print at 300 DPI.
-  target_long_edge_px: 6000
+  # Upscale so the LONGEST edge reaches this many pixels, preserving the original
+  # aspect ratio. 10800px long edge = 36 inch print at 300 DPI (e.g. a 2:3 image
+  # becomes 7200 x 10800).
+  target_long_edge_px: 10800
 
-# ---- Print output requirements (Lumaprints) ----
+# ---- Output files ----
+# Each approved image is saved TWICE (same pixels, two files):
+#   * "Prepress"   — full print quality, high DPI  (for the printer)
+#   * "Placeholder"— same size, low DPI + lighter compression (small file for web)
+# Naming: "Amanda at the Flag AR 1x1" -> "Amanda at the Flag Prepress AR 1x1"
+#                                     -> "Amanda at the Flag Placeholder AR 1x1"
 output:
   format: "jpeg"          # jpeg | png  (Lumaprints accepts JPG/JPEG/PNG)
-  # Leslie's rule (26 Jul): 300 DPI for painterly art, 200 DPI for illustration.
-  # The AI step classifies each image; painterly is the safe default.
-  dpi_painterly: 300
-  dpi_illustration: 200
-  jpeg_quality: 95
+  prepress_tag: "Prepress"
+  placeholder_tag: "Placeholder"
+
+  # Prepress (high-res print file). Leslie's rule: 300 DPI painterly, 200 illustration.
+  prepress_dpi_painterly: 300
+  prepress_dpi_illustration: 200
+  prepress_jpeg_quality: 95
+
+  # Placeholder (low-res web copy) — same pixels, small file, still good quality.
+  placeholder_dpi: 72
+  placeholder_jpeg_quality: 70
+
   max_file_size_mb: 100   # Lumaprints web uploader cap (warn if exceeded)
+
+# ---- Dropbox upload (optional) ----
+# Credentials live in .env (DROPBOX_APP_KEY / DROPBOX_APP_SECRET / DROPBOX_REFRESH_TOKEN).
+# When they are present, the app shows an "Upload to Dropbox" option after finishing.
+dropbox:
+  enabled: true
+  upload_placeholder: true   # also upload the low-res Placeholder alongside Prepress
 
 # ---- AI vision step ----
 ai:

@@ -57,10 +57,17 @@ class Secrets:
     llm_api_key: str = ""
     llm_base_url: str = "https://openrouter.ai/api/v1"
     llm_model: str = "openai/gpt-4o-mini"
+    dropbox_app_key: str = ""
+    dropbox_app_secret: str = ""
+    dropbox_refresh_token: str = ""
 
     @property
     def has_llm(self) -> bool:
         return bool(self.llm_api_key.strip())
+
+    @property
+    def has_dropbox(self) -> bool:
+        return bool(self.dropbox_app_key and self.dropbox_app_secret and self.dropbox_refresh_token)
 
 
 @dataclass
@@ -89,6 +96,9 @@ def load_secrets() -> Secrets:
         llm_api_key=os.getenv("LLM_API_KEY", "").strip(),
         llm_base_url=os.getenv("LLM_BASE_URL", "https://openrouter.ai/api/v1").strip(),
         llm_model=os.getenv("LLM_MODEL", "openai/gpt-4o-mini").strip(),
+        dropbox_app_key=os.getenv("DROPBOX_APP_KEY", "").strip(),
+        dropbox_app_secret=os.getenv("DROPBOX_APP_SECRET", "").strip(),
+        dropbox_refresh_token=os.getenv("DROPBOX_REFRESH_TOKEN", "").strip(),
     )
 
 

@@ -26,7 +26,6 @@ from src.pipeline import BLOOM_SUFFIX, Pipeline
 from src.run_logger import RunLogger
 
 THUMB = (300, 300)
-VIEWER_MAX = 3000   # cap the pixels loaded into the zoom viewer (keeps RAM sane)
 
 # --- palette -------------------------------------------------------------
 BG = "#f4f5f7"
@@ -43,85 +42,6 @@ IDLE_BG = "#eef0f3"
 IDLE_HOVER = "#e2e6eb"
 LOG_BG = "#0f172a"
 LOG_FG = "#e2e8f0"
-
-
-# =====================================================================
-# Zoomable image viewer
-# =====================================================================
-
-class ImageViewer(tk.Toplevel):
-    def __init__(self, parent, image_path: Path, title: str = "") -> None:
-        super().__init__(parent)
-        self.title(title or Path(image_path).name)
-        self.configure(bg="#111318")
-        self.geometry("1040x780")
-        self.minsize(500, 400)
-
-        img = Image.open(image_path).convert("RGB")
-        if max(img.size) > VIEWER_MAX:
-            img.thumbnail((VIEWER_MAX, VIEWER_MAX))
-        self._base = img
-        self._scale = 1.0
-        self._photo: ImageTk.PhotoImage | None = None
-        self._did_fit = False
-
-        bar = tk.Frame(self, bg="#191c22")
-        bar.pack(fill="x")
-        for txt, cmd in [("−  Zoom out", lambda: self._zoom(0.8)),
-                         ("＋  Zoom in", lambda: self._zoom(1.25)),
-                         ("Fit", self._fit), ("100%", self._actual)]:
-            tk.Button(bar, text=txt, command=cmd, bg="#2a2f3a", fg="#e2e8f0",
-                      activebackground="#3a4150", activeforeground="#fff", relief="flat",
-                      bd=0, padx=12, pady=6).pack(side="left", padx=4, pady=6)
-        tk.Label(bar, text="drag to pan · scroll to zoom", bg="#191c22", fg="#8b93a3").pack(side="left", padx=12)
-        tk.Button(bar, text="Close", command=self.destroy, bg="#2a2f3a", fg="#e2e8f0",
-                  activebackground="#3a4150", relief="flat", bd=0, padx=12, pady=6).pack(side="right", padx=6)
-
-        self.canvas = tk.Canvas(self, bg="#111318", highlightthickness=0, cursor="fleur")
-        self.canvas.pack(fill="both", expand=True)
-        self._img_id = self.canvas.create_image(0, 0, anchor="nw")
-
-        self.canvas.bind("<MouseWheel>", self._on_wheel)
-        self.canvas.bind("<ButtonPress-1>", lambda e: self.canvas.scan_mark(e.x, e.y))
-        self.canvas.bind("<B1-Motion>", lambda e: self.canvas.scan_dragto(e.x, e.y, gain=1))
-        self.bind("<Escape>", lambda e: self.destroy())
-        self.transient(parent)
-        self.after(60, self._maybe_initial_fit)
-        self.canvas.bind("<Configure>", lambda e: self._maybe_initial_fit())
-
-    def _maybe_initial_fit(self) -> None:
-        if not self._did_fit and self.canvas.winfo_width() > 10:
-            self._did_fit = True
-            self._fit()
-
-    def _render(self) -> None:
-        w = max(1, int(self._base.width * self._scale))
-        h = max(1, int(self._base.height * self._scale))
-        self._photo = ImageTk.PhotoImage(self._base.resize((w, h), Image.LANCZOS))
-        self.canvas.itemconfigure(self._img_id, image=self._photo)
-        cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
-        # Center when smaller than the viewport; otherwise anchor top-left and
-        # let the scrollregion enable panning in every direction.
-        x = max(0, (cw - w) // 2)
-        y = max(0, (ch - h) // 2)
-        self.canvas.coords(self._img_id, x, y)
-        self.canvas.configure(scrollregion=(0, 0, max(w, cw), max(h, ch)))
-
-    def _zoom(self, factor: float) -> None:
-        self._scale = max(0.05, min(8.0, self._scale * factor))
-        self._render()
-
-    def _fit(self) -> None:
-        cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
-        self._scale = min(cw / self._base.width, ch / self._base.height)
-        self._render()
-
-    def _actual(self) -> None:
-        self._scale = 1.0
-        self._render()
-
-    def _on_wheel(self, event) -> None:
-        self._zoom(1.1 if event.delta > 0 else 0.9)
 
 
 # =====================================================================
@@ -316,8 +236,8 @@ class App:
         wrap = tk.Frame(self.content, bg=BG)
         wrap.pack(fill="both", expand=True, padx=22, pady=18)
         tk.Label(wrap, text="Review the Bloom results", bg=BG, fg=TEXT, font=self.f_title).pack(anchor="w")
-        tk.Label(wrap, text="Click any image to view it full-screen and zoom in. Keep the good ones "
-                            "approved; re-run Bloom on any that look wrong, then finish.",
+        tk.Label(wrap, text="Click any image to open it in your photo viewer (zoom in there). Keep the "
+                            "good ones approved; re-run Bloom on any that look wrong, then finish.",
                  bg=BG, fg=MUTED, font=self.f_subtitle, justify="left", wraplength=850).pack(anchor="w", pady=(2, 12))
         self._scroll_list(wrap)
         blooms = sorted(self.pipeline.review_dir.glob(f"*{BLOOM_SUFFIX}"))
@@ -348,6 +268,22 @@ class App:
         scroll.pack(side="right", fill="y")
         return card
 
+    def _open_external(self, path: Path) -> None:
+        """Open the image in the operating system's default photo viewer."""
+        import os
+        import subprocess
+        import sys
+        p = str(path)
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(p)  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", p])
+            else:
+                subprocess.Popen(["xdg-open", p])
+        except Exception:  # noqa: BLE001
+            messagebox.showinfo("Open image", p)
+
     def _thumb_label(self, parent, image_path: Path):
         try:
             with Image.open(image_path) as im:
@@ -355,7 +291,7 @@ class App:
                 photo = ImageTk.PhotoImage(im)
             self._thumbs.append(photo)
             lbl = tk.Label(parent, image=photo, bg=CARD, cursor="hand2")
-            lbl.bind("<Button-1>", lambda e, p=image_path: ImageViewer(self.root, p))
+            lbl.bind("<Button-1>", lambda e, p=image_path: self._open_external(p))
             return lbl
         except Exception:  # noqa: BLE001
             return tk.Label(parent, text="[preview unavailable]", bg=CARD, fg=MUTED)
@@ -431,7 +367,7 @@ class App:
         wrap = tk.Frame(self.content, bg=BG)
         wrap.pack(fill="both", expand=True, padx=22, pady=18)
         tk.Label(wrap, text="Finished — print-ready files", bg=BG, fg=TEXT, font=self.f_title).pack(anchor="w")
-        tk.Label(wrap, text=f"Saved to:  {self.output_var.get()}    ·    click any image to zoom",
+        tk.Label(wrap, text=f"Saved to:  {self.output_var.get()}    ·    click any image to open it",
                  bg=BG, fg=MUTED, font=self.f_subtitle, wraplength=850, justify="left").pack(anchor="w", pady=(2, 12))
         self._scroll_list(wrap)
         for r in self._finish_results:
@@ -625,7 +561,7 @@ class App:
                 for child in info["row"].winfo_children():
                     if isinstance(child, tk.Label) and child.cget("image"):
                         child.config(image=photo)
-                        child.bind("<Button-1>", lambda e, p=bloom_path: ImageViewer(self.root, p))
+                        child.bind("<Button-1>", lambda e, p=bloom_path: self._open_external(p))
                         break
             except Exception:  # noqa: BLE001
                 pass

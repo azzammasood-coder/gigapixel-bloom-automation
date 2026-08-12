@@ -15,7 +15,7 @@
 #         review and output screens, and the Dropbox upload is simulated. Great for
 #         demos or clicking through the whole flow.
 # false = normal operation (real processing, real uploads).
-test_mode: false
+test_mode: true
 
 # ---- Step 1: Bloom enhancement ----
 # Leslie's rule: keep the painterly brush strokes, use the LOWEST creative

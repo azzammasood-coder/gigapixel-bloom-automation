@@ -77,9 +77,11 @@ class App:
         self._init_style()
 
         # --- persistent layout: swappable content on top, Activity log always at bottom ---
+        # Pack the bottom Activity bar FIRST so it reserves its space; the content
+        # area then fills whatever is left (its scroll list shrinks, not the log).
         self.content = tk.Frame(root, bg=BG)
-        self.content.pack(side="top", fill="both", expand=True)
         self._build_statusbar(root)
+        self.content.pack(side="top", fill="both", expand=True)
 
         self._build_setup_screen()
         self.root.after(100, self._drain_log)
@@ -148,9 +150,14 @@ class App:
         tk.Label(head, text="Activity", bg=BG, fg=MUTED, font=self.f_section).pack(side="left", pady=(4, 2))
         self.hint_label = tk.Label(head, text="", bg=BG, fg=MUTED, font=self.f_body)
         self.hint_label.pack(side="right")
-        _, logcard = self._card(bar)
-        logcard.master.pack(fill="x", padx=22, pady=(0, 14))
-        self.log_box = tk.Text(logcard, height=8, state="disabled", wrap="word", bg=LOG_BG, fg=LOG_FG,
+        # Fixed-height container so the Activity panel is the SAME size on every
+        # screen and never gets squeezed by taller content above it.
+        holder = tk.Frame(bar, bg=BG, height=170)
+        holder.pack(fill="x", padx=22, pady=(0, 14))
+        holder.pack_propagate(False)
+        _, logcard = self._card(holder)
+        logcard.master.pack(fill="both", expand=True)
+        self.log_box = tk.Text(logcard, state="disabled", wrap="word", bg=LOG_BG, fg=LOG_FG,
                                insertbackground=LOG_FG, relief="flat", font=self.f_mono, padx=14, pady=10,
                                highlightthickness=0, borderwidth=0)
         sb = ttk.Scrollbar(logcard, command=self.log_box.yview)
@@ -239,7 +246,7 @@ class App:
             config = settings_only if self._test_mode else load_config(load_env=True)
             logger = self._make_logger()
             if self._test_mode:
-                logger.user("TEST MODE — no Topaz or Dropbox calls will be made (no credits used).")
+                logger.user("Practice run (test mode) — nothing is sent online and no credits are used.")
             self.pipeline = Pipeline(config, logger=logger, dry_run=self._test_mode)
             self.pipeline.run_bloom_phase(input_path, output_path)
             self.log_queue.put("__BLOOM_DONE__")

@@ -88,7 +88,7 @@ class TopazClient:
             params=params or {},
         )
         detail(f"submitted job {process_id} (model='{model}', out={output_width}x{output_height})")
-        user("   Sent to Topaz — processing (this can take a while for large images)…")
+        user("   Working on it… this can take a little while for large images.")
         self._wait_until_complete(process_id, detail, user, t0)
         detail(f"processing finished in {time.monotonic() - t0:.0f}s; downloading result")
         url = self._download_url(process_id)
@@ -158,7 +158,7 @@ class TopazClient:
             # Keep the user informed during the long processing wait.
             if elapsed - last_beat >= heartbeat:
                 last_beat = elapsed
-                user(f"   still working… ({elapsed:.0f}s elapsed)")
+                user(f"   still working… ({elapsed:.0f}s)")
             time.sleep(self.poll_interval)
 
     def _download_url(self, process_id: str) -> str:

@@ -109,14 +109,14 @@ class Pipeline:
             self.log.user("No images found. Please pick an image file or a folder of images.")
             return []
 
-        self.log.banner(f"Step 1 of 2 — Enhancing {len(images)} image(s) with Bloom")
+        self.log.banner(f"Step 1 of 2: Enhancing {len(images)} image(s)…")
         self.log.detail(f"input={input_path}  review_dir={self.review_dir}")
         results = []
         for i, img in enumerate(images, 1):
-            self.log.user(f"[{i} of {len(images)}]  {img.name}")
+            self.log.user(f"Image {i} of {len(images)}: {img.stem}")
             results.append(self.bloom_one(img))
         ok = sum(1 for r in results if r.ok)
-        self.log.user(f"Bloom finished — {ok} of {len(results)} ready to review.")
+        self.log.user(f"Step 1 done — {ok} image(s) ready to review below.")
         return results
 
     def bloom_one(
@@ -149,7 +149,6 @@ class Pipeline:
                 self.log.detail("dry-run: copied original as Bloom preview (no API call)")
             else:
                 bloom = settings["bloom"]
-                self.log.user("   Enhancing with Bloom…")
                 self.log.detail(
                     f"Bloom params: model={bloom['model']} strength={bloom['strength']} "
                     f"face={bloom['face_enhancement']}/{bloom['face_enhancement_strength']}")
@@ -176,7 +175,7 @@ class Pipeline:
             result.bloom_output = bloom_out
             result.sidecar = sidecar
             result.ok = True
-            self.log.user(f"   Done in {time.monotonic() - t0:.0f}s — ready to review.")
+            self.log.user(f"   Finished in {time.monotonic() - t0:.0f}s.")
         except Exception as exc:  # noqa: BLE001 - per-image, keep batch going
             result.error = str(exc)
             self.log.error(f"couldn't enhance {image_path.name}: {exc}", exc)
@@ -205,14 +204,14 @@ class Pipeline:
             self.log.user("Nothing approved to finish.")
             return []
 
-        self.log.banner(f"Step 2 of 2 — Upscaling {len(sidecars)} approved image(s) for print")
+        self.log.banner(f"Step 2 of 2: Preparing {len(sidecars)} image(s) for print…")
         self.log.detail(f"output_dir={output_dir}")
         results = []
         for i, sc in enumerate(sidecars, 1):
-            self.log.user(f"[{i} of {len(sidecars)}]  {sc.name[:-len(SIDECAR_SUFFIX)]}")
+            self.log.user(f"Image {i} of {len(sidecars)}: {sc.name[:-len(SIDECAR_SUFFIX)]}")
             results.append(self.finish_one(sc, output_dir))
         ok = sum(1 for r in results if r.ok)
-        self.log.user(f"All done — {ok} of {len(results)} print-ready file(s) saved.")
+        self.log.user(f"All done — {ok} image(s) saved to your output folder.")
         return results
 
     def finish_one(self, sidecar_path: Path, output_dir: Path) -> ImageResult:
@@ -292,10 +291,10 @@ class Pipeline:
             result.output = prepress_path
             result.placeholder = placeholder_path
             result.ok = True
-            self.log.user(f"   Done in {time.monotonic() - t0:.0f}s. Saved:")
-            self.log.user(f"      {prepress_path.name}  ({pre_mb:.1f} MB, {prepress_dpi} DPI)")
-            self.log.user(f"      {placeholder_path.name}  ({ph_mb:.1f} MB, web copy)")
-            self.log.detail(f"prepress -> {prepress_path}\nplaceholder -> {placeholder_path}")
+            self.log.user(f"   Finished in {time.monotonic() - t0:.0f}s. Saved a high-res print file "
+                          f"({pre_mb:.1f} MB) and a web copy ({ph_mb:.1f} MB).")
+            self.log.detail(f"prepress -> {prepress_path} ({pre_mb:.1f} MB, {prepress_dpi} DPI)")
+            self.log.detail(f"placeholder -> {placeholder_path} ({ph_mb:.1f} MB)")
         except Exception as exc:  # noqa: BLE001
             result.error = str(exc)
             self.log.error(f"couldn't finish {source.name}: {exc}", exc)

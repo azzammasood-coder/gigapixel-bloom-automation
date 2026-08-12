@@ -64,6 +64,10 @@ class App:
         self.worker: threading.Thread | None = None
 
         self.pipeline: Pipeline | None = None
+        try:
+            self._test_mode = bool(load_config(load_env=False).get("test_mode", False))
+        except Exception:  # noqa: BLE001
+            self._test_mode = False
         self._thumbs: list[ImageTk.PhotoImage] = []
         self.rows: dict[str, dict] = {}
         self._finish_results: list = []
@@ -169,7 +173,12 @@ class App:
         wrap.pack(fill="both", expand=True, padx=22, pady=18)
         tk.Label(wrap, text="Gigapixel + Bloom Automation", bg=BG, fg=TEXT, font=self.f_title).pack(anchor="w")
         tk.Label(wrap, text="Enhance and upscale your art into print-ready files.",
-                 bg=BG, fg=MUTED, font=self.f_subtitle).pack(anchor="w", pady=(2, 14))
+                 bg=BG, fg=MUTED, font=self.f_subtitle).pack(anchor="w", pady=(2, 6))
+        if self._test_mode:
+            tk.Label(wrap, text="  ●  TEST MODE — practice run, no APIs called, no credits used  ",
+                     bg="#fef3c7", fg="#92400e", font=self.f_btn).pack(anchor="w", pady=(0, 10))
+        else:
+            tk.Frame(wrap, bg=BG, height=6).pack()
 
         _, card = self._card(wrap)
         card.master.pack(fill="x")
@@ -224,7 +233,14 @@ class App:
 
     def _run_bloom(self, input_path: str, output_path: str) -> None:
         try:
-            self.pipeline = Pipeline(load_config(), logger=self._make_logger())
+            # Peek test_mode from config first; in test mode we don't need API keys.
+            settings_only = load_config(load_env=False)
+            self._test_mode = bool(settings_only.get("test_mode", False))
+            config = settings_only if self._test_mode else load_config(load_env=True)
+            logger = self._make_logger()
+            if self._test_mode:
+                logger.user("TEST MODE — no Topaz or Dropbox calls will be made (no credits used).")
+            self.pipeline = Pipeline(config, logger=logger, dry_run=self._test_mode)
             self.pipeline.run_bloom_phase(input_path, output_path)
             self.log_queue.put("__BLOOM_DONE__")
         except Exception as exc:  # noqa: BLE001
@@ -375,10 +391,14 @@ class App:
 
         dbcard_outer, dbcard = self._card(wrap)
         dbcard_outer.pack(fill="x", pady=(12, 0))
-        has_db = bool(self.pipeline and self.pipeline.config.secrets
-                      and self.pipeline.config.secrets.has_dropbox
-                      and self.pipeline.config.get("dropbox", {}).get("enabled"))
-        tk.Label(dbcard, text="Upload to Dropbox (optional)", bg=CARD, fg=TEXT,
+        has_db = self._test_mode or bool(
+            self.pipeline and self.pipeline.config.secrets
+            and self.pipeline.config.secrets.has_dropbox
+            and self.pipeline.config.get("dropbox", {}).get("enabled"))
+        db_title = "Upload to Dropbox (optional)"
+        if self._test_mode:
+            db_title += "   —   TEST MODE: uploads are simulated"
+        tk.Label(dbcard, text=db_title, bg=CARD, fg=TEXT,
                  font=self.f_section).pack(anchor="w", padx=14, pady=(12, 6))
         if has_db:
             grid = tk.Frame(dbcard, bg=CARD); grid.pack(fill="x", padx=14, pady=(0, 6))
@@ -446,6 +466,12 @@ class App:
         return DropboxClient(s.dropbox_app_key, s.dropbox_app_secret, s.dropbox_refresh_token)
 
     def _load_dropbox_folders(self) -> None:
+        if self._test_mode:
+            mock = ["", "/LumaPrints High Res (test)", "/Lumaprints Low Res Place holders (test)",
+                    "/Golf Art Studios (test)"]
+            self.log_queue.put("__DBFOLDERS__ " + "\n".join(mock))
+            return
+
         def work():
             try:
                 folders = self._dropbox_client().list_folders("")
@@ -477,11 +503,17 @@ class App:
         def dest_for(folder: str, name: str) -> str:
             return (folder.rstrip("/") + "/" + name) if folder else ("/" + name)
 
+        test_mode = self._test_mode
+
         def work():
             try:
-                log.banner("Uploading to Dropbox")
-                client = self._dropbox_client()
-                client.check()
+                if test_mode:
+                    log.banner("Uploading to Dropbox (TEST MODE — simulated)")
+                else:
+                    log.banner("Uploading to Dropbox")
+                client = None if test_mode else self._dropbox_client()
+                if client is not None:
+                    client.check()
                 t0 = time.monotonic(); count = 0
                 for r in selected:
                     jobs = [(Path(r.output), prepress_folder)]
@@ -489,11 +521,17 @@ class App:
                         jobs.append((Path(r.placeholder), placeholder_folder))
                     for f, folder in jobs:
                         dest = dest_for(folder, f.name)
-                        log.user(f"   Uploading {f.name} → {folder or '/'}")
-                        log.detail(f"upload {f} -> {dest}")
-                        client.upload(f, dest)
+                        if test_mode:
+                            log.user(f"   [simulated] would upload {f.name} → {folder or '/'}")
+                            log.detail(f"TEST MODE upload skipped: {f} -> {dest}")
+                            time.sleep(0.3)
+                        else:
+                            log.user(f"   Uploading {f.name} → {folder or '/'}")
+                            log.detail(f"upload {f} -> {dest}")
+                            client.upload(f, dest)
                         count += 1
-                log.user(f"Uploaded {count} file(s) in {time.monotonic() - t0:.0f}s.")
+                verb = "Simulated upload of" if test_mode else "Uploaded"
+                log.user(f"{verb} {count} file(s) in {time.monotonic() - t0:.0f}s.")
                 self.log_queue.put(f"__UPLOAD_DONE__ {count}")
             except Exception as exc:  # noqa: BLE001
                 log.error(f"Dropbox upload failed: {exc}", exc)
@@ -526,7 +564,11 @@ class App:
                 elif msg.startswith("__UPLOAD_DONE__"):
                     n = msg.split(" ", 1)[1]
                     self._busy(False); self._set_hint(""); self.upload_btn.config(state="normal")
-                    messagebox.showinfo("Uploaded", f"Uploaded {n} file(s) to Dropbox.")
+                    if self._test_mode:
+                        messagebox.showinfo("Test mode", f"Simulated uploading {n} file(s) — nothing was "
+                                                         f"actually sent to Dropbox (test mode).")
+                    else:
+                        messagebox.showinfo("Uploaded", f"Uploaded {n} file(s) to Dropbox.")
                 elif msg.startswith("__UPLOAD_ERR__"):
                     self._busy(False); self._set_hint(""); self.upload_btn.config(state="normal")
                     messagebox.showerror("Upload failed",

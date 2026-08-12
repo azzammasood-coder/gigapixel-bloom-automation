@@ -9,6 +9,14 @@
 #   3) Gigapixel  -> final pass: fix aspect ratio + upscale for print
 # =====================================================================
 
+# ---- Test mode ----
+# true  = practice run: NO Topaz (Bloom/Gigapixel) or Dropbox API calls are made,
+#         no credits are used. Your original images are shown as stand-ins on the
+#         review and output screens, and the Dropbox upload is simulated. Great for
+#         demos or clicking through the whole flow.
+# false = normal operation (real processing, real uploads).
+test_mode: false
+
 # ---- Step 1: Bloom enhancement ----
 # Leslie's rule: keep the painterly brush strokes, use the LOWEST creative
 # changes. "Bloom Realism" + low strength preserves detail; "Bloom Creative"

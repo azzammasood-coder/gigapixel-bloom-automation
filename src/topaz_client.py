@@ -74,9 +74,11 @@ class TopazClient:
         """
         image_path = Path(image_path)
         output_path = Path(output_path)
-        # Prefer technical stream if available; else accept a plain callable/None.
+        # Two streams if a RunLogger was passed; else accept a plain callable/None.
         detail = getattr(logger, "detail", None) or logger or (lambda *_: None)
+        user = getattr(logger, "user", None) or (lambda *_: None)
 
+        t0 = time.monotonic()
         process_id = self._submit(
             image_path,
             model=model,
@@ -86,7 +88,9 @@ class TopazClient:
             params=params or {},
         )
         detail(f"submitted job {process_id} (model='{model}', out={output_width}x{output_height})")
-        self._wait_until_complete(process_id, detail)
+        user("   Sent to Topaz — processing (this can take a while for large images)…")
+        self._wait_until_complete(process_id, detail, user, t0)
+        detail(f"processing finished in {time.monotonic() - t0:.0f}s; downloading result")
         url = self._download_url(process_id)
         self._save(url, output_path)
         detail(f"saved -> {output_path}")
@@ -132,8 +136,10 @@ class TopazClient:
             raise TopazError(f"No process_id in response: {payload}")
         return str(process_id)
 
-    def _wait_until_complete(self, process_id: str, log) -> None:
+    def _wait_until_complete(self, process_id: str, detail, user, t0: float,
+                             heartbeat: float = 8.0) -> None:
         deadline = time.monotonic() + self.timeout
+        last_beat = 0.0
         while True:
             resp = self._session.get(
                 STATUS_URL.format(process_id=process_id),
@@ -141,12 +147,18 @@ class TopazClient:
             )
             payload = self._json_or_raise(resp, "check status")
             status = str(payload.get("status", "")).lower()
+            elapsed = time.monotonic() - t0
+            detail(f"status='{status}' ({elapsed:.0f}s)")
             if status in {"completed", "complete", "success", "succeeded"}:
                 return
             if status in {"failed", "error", "cancelled", "canceled"}:
                 raise TopazError(f"Job {process_id} ended with status '{status}': {payload}")
             if time.monotonic() > deadline:
                 raise TopazError(f"Timed out waiting for job {process_id} after {self.timeout}s")
+            # Keep the user informed during the long processing wait.
+            if elapsed - last_beat >= heartbeat:
+                last_beat = elapsed
+                user(f"   still working… ({elapsed:.0f}s elapsed)")
             time.sleep(self.poll_interval)
 
     def _download_url(self, process_id: str) -> str:

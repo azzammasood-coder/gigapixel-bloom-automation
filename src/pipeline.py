@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import shutil
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -134,6 +135,7 @@ class Pipeline:
         stem = image_path.stem
         bloom_out = self.review_dir / f"{stem}{BLOOM_SUFFIX}"
         sidecar = self.review_dir / f"{stem}{SIDECAR_SUFFIX}"
+        t0 = time.monotonic()
         try:
             settings = self._decide_settings(image_path)
             if strength_override is not None:
@@ -174,7 +176,7 @@ class Pipeline:
             result.bloom_output = bloom_out
             result.sidecar = sidecar
             result.ok = True
-            self.log.user("   Done — ready to review.")
+            self.log.user(f"   Done in {time.monotonic() - t0:.0f}s — ready to review.")
         except Exception as exc:  # noqa: BLE001 - per-image, keep batch going
             result.error = str(exc)
             self.log.error(f"couldn't enhance {image_path.name}: {exc}", exc)
@@ -220,6 +222,7 @@ class Pipeline:
         result = ImageResult(source=source)
         self.gigapixel_dir.mkdir(parents=True, exist_ok=True)
         stem = source.stem
+        t0 = time.monotonic()
         try:
             final_cfg = self.config["gigapixel_final"]
             out_cfg = self.config["output"]
@@ -289,8 +292,9 @@ class Pipeline:
             result.output = prepress_path
             result.placeholder = placeholder_path
             result.ok = True
-            self.log.user(f"   Saved: {prepress_path.name}  ({pre_mb:.1f} MB, {prepress_dpi} DPI)")
-            self.log.user(f"          {placeholder_path.name}  ({ph_mb:.1f} MB, web copy)")
+            self.log.user(f"   Done in {time.monotonic() - t0:.0f}s. Saved:")
+            self.log.user(f"      {prepress_path.name}  ({pre_mb:.1f} MB, {prepress_dpi} DPI)")
+            self.log.user(f"      {placeholder_path.name}  ({ph_mb:.1f} MB, web copy)")
             self.log.detail(f"prepress -> {prepress_path}\nplaceholder -> {placeholder_path}")
         except Exception as exc:  # noqa: BLE001
             result.error = str(exc)

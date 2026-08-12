@@ -59,6 +59,10 @@ output:
 dropbox:
   enabled: true
   upload_placeholder: true   # also upload the low-res Placeholder alongside Prepress
+  # The picker auto-selects the folder whose name contains these words (case-insensitive).
+  # Prepress (high-res) -> "high res" folder; Placeholder (low-res) -> "placeholder" folder.
+  prepress_folder_hint: "high res"
+  placeholder_folder_hint: "placeholder"
 
 # ---- AI vision step ----
 ai:

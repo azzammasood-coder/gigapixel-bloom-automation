@@ -130,7 +130,8 @@ class App:
 
         self.input_var = tk.StringVar()
         self.output_var = tk.StringVar(value=str(app_dir() / "output"))
-        self.dropbox_folder_var = tk.StringVar(value="")
+        self.prepress_folder_var = tk.StringVar(value="")
+        self.placeholder_folder_var = tk.StringVar(value="")
         self.log_queue: "queue.Queue[str]" = queue.Queue()
         self.worker: threading.Thread | None = None
 
@@ -420,16 +421,28 @@ class App:
         tk.Label(dbcard, text="Upload to Dropbox (optional)", bg=CARD, fg=TEXT,
                  font=self.f_section).pack(anchor="w", padx=14, pady=(12, 4))
         if has_db:
-            rowf = tk.Frame(dbcard, bg=CARD); rowf.pack(fill="x", padx=14, pady=(0, 12))
-            tk.Label(rowf, text="Folder:", bg=CARD, fg=MUTED, font=self.f_body).pack(side="left")
-            self.folder_combo = ttk.Combobox(rowf, textvariable=self.dropbox_folder_var, width=40, values=[""])
-            self.folder_combo.pack(side="left", padx=6)
-            ttk.Button(rowf, text="Refresh folders", command=self._load_dropbox_folders).pack(side="left", padx=4)
+            grid = tk.Frame(dbcard, bg=CARD); grid.pack(fill="x", padx=14, pady=(0, 6))
+            tk.Label(grid, text="High-res (Prepress) folder:", bg=CARD, fg=MUTED,
+                     font=self.f_body).grid(row=0, column=0, sticky="w", pady=3)
+            self.prepress_combo = ttk.Combobox(grid, textvariable=self.prepress_folder_var, width=46, values=[""])
+            self.prepress_combo.grid(row=0, column=1, sticky="w", padx=8, pady=3)
+            tk.Label(grid, text="Low-res (Placeholder) folder:", bg=CARD, fg=MUTED,
+                     font=self.f_body).grid(row=1, column=0, sticky="w", pady=3)
+            self.placeholder_combo = ttk.Combobox(grid, textvariable=self.placeholder_folder_var, width=46, values=[""])
+            self.placeholder_combo.grid(row=1, column=1, sticky="w", padx=8, pady=3)
+            ttk.Button(grid, text="Refresh folders", command=self._load_dropbox_folders).grid(
+                row=0, column=2, rowspan=2, padx=8)
+
+            rowf = tk.Frame(dbcard, bg=CARD); rowf.pack(fill="x", padx=14, pady=(2, 6))
             self.upload_btn = ttk.Button(rowf, text="Upload selected  →", style="Accent.TButton",
                                          command=self._start_upload)
             self.upload_btn.pack(side="right")
             self.upload_progress = ttk.Progressbar(dbcard, style="Accent.Horizontal.TProgressbar",
                                                    mode="determinate", value=0)
+            self.dropbox_status = tk.Label(dbcard, text="Pick folders above (or type a path like /Prints). "
+                                                        "Blank = your Dropbox root.",
+                                           bg=CARD, fg=MUTED, font=self.f_body, wraplength=780, justify="left")
+            self.dropbox_status.pack(anchor="w", padx=14, pady=(0, 12))
             self._load_dropbox_folders()
         else:
             tk.Label(dbcard, text="Dropbox isn't set up yet. Add DROPBOX_APP_KEY, DROPBOX_APP_SECRET and "
@@ -483,6 +496,36 @@ class App:
                 self.log_queue.put(f"__DBERR__ {exc}")
         threading.Thread(target=work, daemon=True).start()
 
+    def _apply_dropbox_folders(self, folders: list[str]) -> None:
+        """Fill both folder dropdowns and auto-select the best match for each."""
+        if not (hasattr(self, "prepress_combo") and self.prepress_combo.winfo_exists()):
+            return
+        self.prepress_combo.configure(values=folders)
+        self.placeholder_combo.configure(values=folders)
+
+        db_cfg = self.pipeline.config.get("dropbox", {}) if self.pipeline else {}
+        pre_hint = str(db_cfg.get("prepress_folder_hint", "high res")).lower()
+        ph_hint = str(db_cfg.get("placeholder_folder_hint", "placeholder")).lower()
+
+        def norm(s: str) -> str:
+            return "".join(ch for ch in s.lower() if ch.isalnum())
+
+        def best_match(hint: str) -> str:
+            h = norm(hint)
+            for f in folders:
+                if f and h in norm(f):   # e.g. "placeholder" matches "Place holders"
+                    return f
+            return ""
+
+        if not self.prepress_folder_var.get():
+            self.prepress_folder_var.set(best_match(pre_hint))
+        if not self.placeholder_folder_var.get():
+            self.placeholder_folder_var.set(best_match(ph_hint))
+        if hasattr(self, "dropbox_status") and self.dropbox_status.winfo_exists():
+            self.dropbox_status.config(
+                text="Folders loaded — high-res and low-res auto-selected. Change them if needed.",
+                fg=MUTED)
+
     def _start_upload(self) -> None:
         if self.worker and self.worker.is_alive():
             return
@@ -490,11 +533,15 @@ class App:
         if not selected:
             messagebox.showwarning("Nothing selected", "Tick at least one image to upload.")
             return
-        folder = self.dropbox_folder_var.get().strip()
+        prepress_folder = self.prepress_folder_var.get().strip()
+        placeholder_folder = self.placeholder_folder_var.get().strip()
         self.upload_btn.config(state="disabled")
         self.upload_progress.pack(fill="x", padx=14, pady=(0, 12))
         self._busy_start(self.upload_progress)
         upload_placeholder = bool(self.pipeline.config.get("dropbox", {}).get("upload_placeholder", True))
+
+        def dest_for(folder: str, name: str) -> str:
+            return (folder.rstrip("/") + "/" + name) if folder else ("/" + name)
 
         def work():
             try:
@@ -502,13 +549,12 @@ class App:
                 client.check()
                 count = 0
                 for r in selected:
-                    files = [Path(r.output)]
+                    jobs = [(Path(r.output), prepress_folder)]           # Prepress -> high-res folder
                     if upload_placeholder and r.placeholder:
-                        files.append(Path(r.placeholder))
-                    for f in files:
-                        dest = (folder.rstrip("/") + "/" + f.name) if folder else ("/" + f.name)
+                        jobs.append((Path(r.placeholder), placeholder_folder))  # Placeholder -> low-res folder
+                    for f, folder in jobs:
                         self.log_queue.put(f"Uploading {f.name} …")
-                        client.upload(f, dest)
+                        client.upload(f, dest_for(folder, f.name))
                         count += 1
                 self.log_queue.put(f"__UPLOAD_DONE__ {count}")
             except Exception as exc:  # noqa: BLE001
@@ -534,11 +580,14 @@ class App:
                     self._build_output_screen()
                 elif msg.startswith("__DBFOLDERS__"):
                     folders = msg[len("__DBFOLDERS__"):].split("\n")
-                    if hasattr(self, "folder_combo") and self.folder_combo.winfo_exists():
-                        self.folder_combo.configure(values=folders)
+                    self._apply_dropbox_folders(folders)
                 elif msg.startswith("__DBERR__"):
-                    messagebox.showerror("Dropbox", f"Couldn't reach Dropbox:\n{msg[len('__DBERR__ '):]}"
-                                                    f"\n\nDetails in {log_file_path()}")
+                    # Non-fatal: uploading still works, folder LISTING just failed
+                    # (usually a missing files.metadata.read scope). Let them type a path.
+                    if hasattr(self, "dropbox_status") and self.dropbox_status.winfo_exists():
+                        self.dropbox_status.config(
+                            text="Couldn't list your folders (folder-listing permission not granted). "
+                                 "You can still type a folder path like /Prints and upload.", fg="#b45309")
                 elif msg.startswith("__UPLOAD_DONE__"):
                     n = msg.split(" ", 1)[1]
                     self._busy_stop(self.upload_progress); self.upload_progress.pack_forget()

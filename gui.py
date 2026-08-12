@@ -260,18 +260,21 @@ class App:
         wrap.pack(fill="both", expand=True, padx=22, pady=18)
         tk.Label(wrap, text="Review the Bloom results", bg=BG, fg=TEXT, font=self.f_title).pack(anchor="w")
         tk.Label(wrap, text="Click any image to open it in your photo viewer (zoom in there). Keep the "
-                            "good ones approved; re-run Bloom on any that look wrong, then finish.",
+                            "good ones approved; re-run Bloom on any that look wrong, then run Gigapixel.",
                  bg=BG, fg=MUTED, font=self.f_subtitle, justify="left", wraplength=850).pack(anchor="w", pady=(2, 12))
+        # Pin the buttons to the bottom FIRST so they're always visible; the
+        # scrollable image list then fills the space in between.
+        bottom = tk.Frame(wrap, bg=BG); bottom.pack(side="bottom", fill="x", pady=(12, 0))
+        ttk.Button(bottom, text="←  Back", command=self._build_setup_screen).pack(side="left")
+        self.finish_btn = ttk.Button(bottom, text="Run Gigapixel  →", style="Accent.TButton",
+                                     command=self._start_finish)
+        self.finish_btn.pack(side="right")
         self._scroll_list(wrap)
         blooms = sorted(self.pipeline.review_dir.glob(f"*{BLOOM_SUFFIX}"))
         if not blooms:
             tk.Label(self.list_frame, text="No Bloom results found.", bg=CARD, fg=MUTED).pack(pady=20)
         for b in blooms:
             self._add_review_row(b)
-        bottom = tk.Frame(wrap, bg=BG); bottom.pack(fill="x", pady=(12, 0))
-        ttk.Button(bottom, text="←  Back", command=self._build_setup_screen).pack(side="left")
-        self.finish_btn = ttk.Button(bottom, text="Finish approved  →", style="Accent.TButton", command=self._start_finish)
-        self.finish_btn.pack(side="right")
         self._set_hint("")
 
     def _scroll_list(self, parent):
@@ -328,7 +331,9 @@ class App:
         tk.Label(right, text=stem, bg=CARD, fg=TEXT, font=self.f_section, wraplength=420, justify="left").pack(anchor="w")
 
         approve_var = tk.BooleanVar(value=True)
-        self._toggle_button(right, approve_var, "✓  Approved for print", "Approve for print").pack(anchor="w", pady=(8, 6))
+        self._toggle_button(right, approve_var,
+                            "✓  Approved for print   (click to undo)",
+                            "Approve for print").pack(anchor="w", pady=(8, 6))
 
         rerun = tk.Frame(right, bg=CARD); rerun.pack(anchor="w")
         tk.Label(rerun, text="Bloom strength:", bg=CARD, fg=MUTED, font=self.f_body).pack(side="left")
@@ -392,12 +397,15 @@ class App:
         tk.Label(wrap, text="Finished — print-ready files", bg=BG, fg=TEXT, font=self.f_title).pack(anchor="w")
         tk.Label(wrap, text=f"Saved to:  {self.output_var.get()}    ·    click any image to open it",
                  bg=BG, fg=MUTED, font=self.f_subtitle, wraplength=850, justify="left").pack(anchor="w", pady=(2, 12))
-        self._scroll_list(wrap)
-        for r in self._finish_results:
-            self._add_output_row(r)
+
+        # Pin the bottom buttons and the Dropbox card FIRST so they're always
+        # visible; the scrollable image list then fills the space in between.
+        bottom = tk.Frame(wrap, bg=BG); bottom.pack(side="bottom", fill="x", pady=(12, 0))
+        ttk.Button(bottom, text="←  Start over", command=self._build_setup_screen).pack(side="left")
+        ttk.Button(bottom, text="Open output folder", command=self._open_output).pack(side="left", padx=8)
 
         dbcard_outer, dbcard = self._card(wrap)
-        dbcard_outer.pack(fill="x", pady=(12, 0))
+        dbcard_outer.pack(side="bottom", fill="x", pady=(12, 0))
         has_db = self._test_mode or bool(
             self.pipeline and self.pipeline.config.secrets
             and self.pipeline.config.secrets.has_dropbox
@@ -420,7 +428,7 @@ class App:
             ttk.Button(grid, text="Refresh folders", command=self._load_dropbox_folders).grid(
                 row=0, column=2, rowspan=2, padx=8)
             self.dropbox_status = tk.Label(dbcard, text="Choose a folder for each (or type a path). "
-                                                        "Blank = your Dropbox root.",
+                                                        "Leave blank to upload to your Dropbox root.",
                                            bg=CARD, fg=MUTED, font=self.f_body, wraplength=800, justify="left")
             self.dropbox_status.pack(anchor="w", padx=14, pady=(2, 6))
             rowf = tk.Frame(dbcard, bg=CARD); rowf.pack(fill="x", padx=14, pady=(0, 12))
@@ -434,9 +442,11 @@ class App:
                      bg=CARD, fg=MUTED, font=self.f_body, wraplength=800, justify="left").pack(
                          anchor="w", padx=14, pady=(0, 12))
 
-        bottom = tk.Frame(wrap, bg=BG); bottom.pack(fill="x", pady=(12, 0))
-        ttk.Button(bottom, text="←  Start over", command=self._build_setup_screen).pack(side="left")
-        ttk.Button(bottom, text="Open output folder", command=self._open_output).pack(side="left", padx=8)
+        # The scrollable image list fills the space between the header and the
+        # pinned Dropbox card / buttons above.
+        self._scroll_list(wrap)
+        for r in self._finish_results:
+            self._add_output_row(r)
         self._set_hint("")
 
     def _add_output_row(self, result) -> None:
@@ -456,7 +466,9 @@ class App:
         tk.Label(right, text=f"{dims}{ph}", bg=CARD, fg=MUTED, font=self.f_body,
                  wraplength=440, justify="left").pack(anchor="w", pady=(2, 4))
         upload_var = tk.BooleanVar(value=True)
-        self._toggle_button(right, upload_var, "✓  Will upload", "Skip upload").pack(anchor="w", pady=(2, 0))
+        self._toggle_button(right, upload_var,
+                            "✓  Will upload   (click to skip)",
+                            "Not uploading   (click to include)").pack(anchor="w", pady=(2, 0))
         self.out_rows[stem] = {"result": result, "upload": upload_var}
 
     def _open_output(self) -> None:

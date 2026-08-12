@@ -25,7 +25,9 @@ class RunLogger:
         self._logger.handlers.clear()
         self._logger.propagate = False
         try:
-            fh = logging.FileHandler(self.log_file, encoding="utf-8")
+            # mode="w" -> the log is overwritten at the start of each run, so it
+            # always reflects just the most recent run.
+            fh = logging.FileHandler(self.log_file, mode="w", encoding="utf-8")
             fh.setFormatter(logging.Formatter("%(asctime)s  %(levelname)-7s  %(message)s"))
             self._logger.addHandler(fh)
         except OSError:

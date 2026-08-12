@@ -472,11 +472,19 @@ class App:
             self.log_queue.put("__DBFOLDERS__ " + "\n".join(mock))
             return
 
+        log = self.pipeline.log if self.pipeline else None
+
         def work():
             try:
+                if log:
+                    log.detail("Dropbox: listing folders")
                 folders = self._dropbox_client().list_folders("")
+                if log:
+                    log.detail(f"Dropbox: found {len(folders)} folder(s)")
                 self.log_queue.put("__DBFOLDERS__ " + "\n".join([""] + folders))
             except Exception as exc:  # noqa: BLE001
+                if log:
+                    log.error(f"Dropbox folder listing failed: {exc}", exc)
                 self.log_queue.put(f"__DBERR__ {exc}")
         threading.Thread(target=work, daemon=True).start()
 
